@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hệ Thống Kiểm Dò Tài Khoản Trung Gian</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Custom Stylesheet -->
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- SIDEBAR BÊN TRÁI -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                        <path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/>
+                        <path d="M12 6v6l4 2"/>
+                    </svg>
+                </div>
+                <div class="sidebar-title">
+                    <h2>ĐIỆN LỰC VŨNG TÀU</h2>
+                    <p>Hệ thống Kiểm dò TKTG</p>
+                </div>
+            </div>
+            
+            <div class="sidebar-info-card">
+                <h3 class="info-card-title">Hướng dẫn nhanh</h3>
+                <ul class="info-steps">
+                    <li><span class="step-num">1</span> Tải lên file Excel phát sinh</li>
+                    <li><span class="step-num">2</span> Bấm <strong>Phân Tích Đối Chiếu</strong></li>
+                    <li><span class="step-num">3</span> Click chọn tài khoản trung gian ở <strong>Bảng A</strong></li>
+                    <li><span class="step-num">4</span> Click số chênh lệch của Creator ở <strong>Bảng B</strong> để xem chi tiết ở <strong>Bảng C</strong></li>
+                </ul>
+            </div>
+            
+            <div class="sidebar-footer">
+                <div class="footer-status">
+                    <span class="status-indicator offline" id="connection-status"></span>
+                    <span class="status-text">Đang chờ tải file...</span>
+                </div>
+                <p class="app-version">Phiên bản Streamlit Cloud 1.0</p>
+            </div>
+        </aside>
+
+        <!-- MAIN PANEL PHÍA PHẢI -->
+        <main class="main-panel">
+            <!-- TOP BAR ĐIỀU KHIỂN -->
+            <header class="top-bar">
+                <div class="header-main-title">
+                    <h1>HỆ THỐNG KIỂM DÒ TÀI KHOẢN TRUNG GIAN</h1>
+                    <p class="subtitle" id="current-filename">Vui lòng tải lên file Excel phát sinh để bắt đầu đối chiếu</p>
+                </div>
+                <div class="header-controls">
+                    <!-- Input File ẩn -->
+                    <input type="file" id="excel-file-input" accept=".xlsx" style="display: none;">
+                    
+                    <button class="btn btn-secondary" id="btn-add-file">
+                        <span class="btn-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                <polyline points="17 8 12 3 7 8"/>
+                                <line x1="12" y1="3" x2="12" y2="15"/>
+                            </svg>
+                        </span>
+                        <span>Tải File Excel</span>
+                    </button>
+                    
+                    <button class="btn btn-primary" id="btn-analyze" disabled>
+                        <span class="btn-icon">
+                            <svg class="icon-spin-target" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                                <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+                            </svg>
+                        </span>
+                        <span>Phân Tích Đối Chiếu</span>
+                    </button>
+                </div>
+            </header>
+
+            <!-- WIDGETS THÔNG TIN KHÁI TOÁN (KPI CARDS) -->
+            <section class="kpi-container">
+                <div class="kpi-card bg-navy">
+                    <div class="kpi-info">
+                        <p class="kpi-label">TỔNG TÀI KHOẢN LỆCH</p>
+                        <h3 class="kpi-value" id="kpi-acc-unbalanced">-</h3>
+                    </div>
+                    <div class="kpi-icon-box">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                            <line x1="12" y1="9" x2="12" y2="13"/>
+                            <line x1="12" y1="17" x2="12.01" y2="17"/>
+                        </svg>
+                    </div>
+                </div>
+                
+                <div class="kpi-card bg-blue">
+                    <div class="kpi-info">
+                        <p class="kpi-label">LỆCH PHÁT SINH NỢ (UNPAIRED)</p>
+                        <h3 class="kpi-value" id="kpi-total-debit">-</h3>
+                    </div>
+                    <div class="kpi-icon-box">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/>
+                            <polyline points="17 6 23 6 23 12"/>
+                        </svg>
+                    </div>
+                </div>
+
+                <div class="kpi-card bg-teal">
+                    <div class="kpi-info">
+                        <p class="kpi-label">LỆCH PHÁT SINH CÓ (UNPAIRED)</p>
+                        <h3 class="kpi-value" id="kpi-total-credit">-</h3>
+                    </div>
+                    <div class="kpi-icon-box">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/>
+                            <polyline points="17 18 23 18 23 12"/>
+                        </svg>
+                    </div>
+                </div>
+
+                <div class="kpi-card bg-glass" id="kpi-diff-card">
+                    <div class="kpi-info">
+                        <p class="kpi-label">TỔNG CHÊNH LỆCH RÒNG</p>
+                        <h3 class="kpi-value" id="kpi-net-diff">-</h3>
+                    </div>
+                    <div class="kpi-icon-box">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="4" y1="9" x2="20" y2="9"/>
+                            <line x1="4" y1="15" x2="20" y2="15"/>
+                        </svg>
+                    </div>
+                </div>
+            </section>
+
+            <!-- KHU VỰC HIỂN THỊ DỮ LIỆU CHÍNH -->
+            <section class="content-body">
+                <!-- PANEL CHỜ DUYỆT / CHƯA CÓ FILE -->
+                <div class="empty-state-panel" id="empty-state">
+                    <div class="empty-state-inner">
+                        <div class="upload-art">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                <polyline points="14 2 14 8 20 8"/>
+                                <line x1="12" y1="18" x2="12" y2="12"/>
+                                <polyline points="9 15 12 12 15 15"/>
+                            </svg>
+                        </div>
+                        <h3>Chưa có dữ liệu phân tích</h3>
+                        <p>Vui lòng click chọn nút <strong>Tải File Excel</strong> để chọn file báo cáo phát sinh, sau đó bấm <strong>Phân Tích Đối Chiếu</strong> để chạy hệ thống phân tích người làm lệch tự động.</p>
+                    </div>
+                </div>
+
+                <!-- LOADING SPINNER -->
+                <div class="loading-state-panel" id="loading-state" style="display: none;">
+                    <div class="loading-inner">
+                        <div class="loader-circle"></div>
+                        <h3>Đang xử lý phân tích...</h3>
+                    </div>
+                </div>
+
+                <!-- UNIFIED DRILL-DOWN DASHBOARD PANEL (3 CẤP ĐỐI CHIẾU) -->
+                <div class="dashboard-panel" id="analysis-dashboard" style="display: none;">
+                    
+                    <!-- BỘ CHỌN TÀI KHOẢN TRÊN ĐẦU (Dropdown C5 dạng Excel) -->
+                    <div class="card filter-card mb-5">
+                        <div class="filter-bar-unified justify-center align-center py-3">
+                            <div class="filter-col text-center" style="max-width: 500px; margin: 0 auto;">
+                                <label for="filter-account-select" class="form-label-bold" style="font-size: 15px; color: var(--navy-light);">CHỌN TÀI KHOẢN ĐỐI CHIẾU (Ô C5):</label>
+                                <select id="filter-account-select" class="form-control-large text-center font-bold" style="border: 2px solid var(--navy-light); background: rgba(255,255,255,0.05); color: var(--text-bright);">
+                                    <option value="" disabled selected>-- Chọn tài khoản trung gian --</option>
+                                    <!-- Nạp động -->
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- CẤP ĐỘ 1: BẢNG TỔNG HỢP PHÁT SINH LỆCH (BẢNG A) -->
+                    <div class="card mb-5">
+                        <div class="card-header bg-navy-subtle flex-header">
+                            <div class="card-header-title">
+                                <span class="card-indicator bg-blue">A</span>
+                                <h3>BẢNG TỔNG HỢP PHÁT SINH LỆCH (TẤT CẢ TÀI KHOẢN)</h3>
+                            </div>
+                            <span class="text-muted" style="font-size: 12px; font-style: italic;">*Click chọn dòng hoặc Tài khoản để xem Bảng B</span>
+                        </div>
+                        <div class="table-container">
+                            <table class="table-hoverable">
+                                <thead>
+                                    <tr>
+                                        <th>Tài khoản</th>
+                                        <th class="text-right">Tổng Phát sinh Nợ</th>
+                                        <th class="text-right">Tổng Phát sinh Có</th>
+                                        <th class="text-right">Chênh lệch (Nợ - Có)</th>
+                                        <th class="text-center">Trạng thái</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tbody-table-a">
+                                    <!-- Nạp động bằng Javascript -->
+                                </tbody>
+                                <tfoot>
+                                    <tr class="tfoot-totals font-bold" style="background: rgba(31, 73, 125, 0.15);">
+                                        <td>Tổng cộng</td>
+                                        <td class="text-right" id="total-a-debit">-</td>
+                                        <td class="text-right" id="total-a-credit">-</td>
+                                        <td class="text-right" id="total-a-diff">-</td>
+                                        <td class="text-center" id="total-a-status">-</td>
+                                    </tr>
+                                </tfoot>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- CẤP ĐỘ 2: BẢNG TRA CỨU NGƯỜI LÀM LỆCH (BẢNG B) -->
+                    <div class="card mb-5" id="table-b-section" style="display: none; animation: slideDown 0.4s ease forwards;">
+                        <div class="card-header bg-teal-subtle flex-header">
+                            <div class="card-header-title">
+                                <span class="card-indicator bg-teal">B</span>
+                                <h3>BẢNG TRA CỨU NGƯỜI LÀM LỆCH CHO TÀI KHOẢN: <span id="selected-account-b-title" class="text-accent">-</span></h3>
+                            </div>
+                            <span class="text-muted" style="font-size: 12px; font-style: italic;">*Click số tiền chênh lệch để xem chi tiết giao dịch (Bảng C)</span>
+                        </div>
+                        <div class="table-container">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Người tạo (Creator)</th>
+                                        <th class="text-right">Tổng Phát sinh Nợ</th>
+                                        <th class="text-right">Tổng Phát sinh Có</th>
+                                        <th class="text-right">Chênh lệch (Nợ - Có)</th>
+                                        <th class="text-center">Trạng thái</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tbody-table-b">
+                                    <!-- Nạp động bằng Javascript -->
+                                </tbody>
+                                <tfoot>
+                                    <tr class="tfoot-totals font-bold" style="background: rgba(31, 73, 125, 0.15);">
+                                        <td>Tổng cộng</td>
+                                        <td class="text-right" id="total-b-debit">-</td>
+                                        <td class="text-right" id="total-b-credit">-</td>
+                                        <td class="text-right clickable-diff" id="total-b-diff" title="Click xem tất cả giao dịch chưa khớp">-</td>
+                                        <td class="text-center" id="total-b-status">-</td>
+                                    </tr>
+                                </tfoot>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- CẤP ĐỘ 3: DANH SÁCH CHI TIẾT CÁC GIAO DỊCH CHƯA ĐỐI ỨNG (BẢNG C) -->
+                    <div class="card mb-5" id="table-c-section" style="display: none; animation: slideDown 0.4s ease forwards;">
+                        <div class="card-header flex-header">
+                            <div class="card-header-title">
+                                <span class="card-indicator bg-red-accent" style="background: var(--color-error-fill);">C</span>
+                                <h3><span id="selected-creator-c-title">-</span></h3>
+                            </div>
+                            <div class="card-actions">
+                                <button class="btn btn-success" id="btn-export-filtered">
+                                    <span class="btn-icon">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                            <polyline points="7 10 12 15 17 10"/>
+                                            <line x1="12" y1="15" x2="12" y2="3"/>
+                                        </svg>
+                                    </span>
+                                    <span>Xuất file lệch</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- SEARCH BAR FOR CHI TIET -->
+                        <div class="filter-bar">
+                            <div class="filter-group flex-grow">
+                                <label for="search-input">Tìm kiếm trong bảng chi tiết:</label>
+                                <input type="text" id="search-input" placeholder="Nhập số chứng từ, ngày giao dịch, người cập nhật, nội dung diễn giải..." class="form-control">
+                            </div>
+                        </div>
+
+                        <!-- DATA TABLE -->
+                        <div class="table-container">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th class="text-center">Dòng</th>
+                                        <th>Tài khoản</th>
+                                        <th>Số chứng từ</th>
+                                        <th>Ngày GD</th>
+                                        <th class="text-right">Số tiền Nợ</th>
+                                        <th class="text-right">Số tiền Có</th>
+                                        <th>Người tạo</th>
+                                        <th>Người cập nhật</th>
+                                        <th>Nội dung giao dịch</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tbody-chitiet">
+                                    <!-- Nạp động bằng Javascript -->
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <!-- PAGINATION FOOTER -->
+                        <div class="pagination-footer">
+                            <div class="pagination-info">
+                                Hiển thị <span id="page-start-row">0</span> đến <span id="page-end-row">0</span> trong tổng số <span id="total-rows-count">0</span> dòng
+                            </div>
+                            <div class="pagination-controls">
+                                <button class="btn-page" id="btn-prev-page" disabled>Trước</button>
+                                <span class="page-number-indicator">Trang <span id="current-page-num">1</span> / <span id="total-pages-num">1</span></span>
+                                <button class="btn-page" id="btn-next-page" disabled>Sau</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- TOAST NOTIFICATION CONTAINER -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- Custom Script -->
+    <script src="app.js"></script>
+</body>
+</html>
