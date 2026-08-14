@@ -1,26 +1,35 @@
 import os
 import sys
-import shutil
-import openpyxl
-import re
-from flask import Flask, request, jsonify, render_template, send_file
-import loc_lech_taikhoan
 
-app = Flask(__name__)
-app.config['JSON_AS_ASCII'] = False
+# Tự động phát hiện khi chạy trên Streamlit Cloud hoặc qua lệnh streamlit run
+IS_STREAMLIT = any('streamlit' in str(arg).lower() for arg in sys.argv) or 'STREAMLIT_SERVER_PORT' in os.environ or 'STREAMLIT_RUN' in os.environ
 
-# Thư mục chứa các file upload và kết quả
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+if IS_STREAMLIT:
+    # Nếu chạy qua Streamlit Cloud, tự động chuyển sang giao diện Streamlit
+    import app_streamlit
+else:
+    import shutil
+    import openpyxl
+    import re
+    from flask import Flask, request, jsonify, render_template, send_file
+    import loc_lech_taikhoan
 
-# Trạng thái hiện tại của ứng dụng
-app_state = {
-    "original_filename": None,
-    "original_filepath": None,
-    "analyzed_filepath": None,
-    "analysis_data": None
-}
+    app = Flask(__name__)
+    app.config['JSON_AS_ASCII'] = False
+
+    # Thư mục chứa các file upload và kết quả
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
+    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+    # Trạng thái hiện tại của ứng dụng
+    app_state = {
+        "original_filename": None,
+        "original_filepath": None,
+        "analyzed_filepath": None,
+        "analysis_data": None
+    }
+
 
 def get_safe_filename(orig_name):
     if not orig_name:
@@ -562,5 +571,6 @@ def export_filtered_file():
         return jsonify({"success": False, "message": f"Lỗi xuất file chi tiết: {str(e)}"}), 500
 
 if __name__ == '__main__':
-    # Đặt host='0.0.0.0' để mọi máy trong cùng mạng nội bộ (LAN/Wi-Fi) đều truy cập được
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    if not IS_STREAMLIT:
+        app.run(host='0.0.0.0', port=5000, debug=True)
+
