@@ -9,6 +9,32 @@ import re
 import unicodedata
 
 
+def parse_float(val, default=0.0):
+    if val is None:
+        return default
+    if isinstance(val, (int, float)):
+        return float(val)
+    s = str(val).strip().strip('="\'')
+    if not s:
+        return default
+    try:
+        return float(s)
+    except (ValueError, TypeError):
+        return default
+
+def parse_int(val, default=0):
+    if val is None:
+        return default
+    if isinstance(val, int):
+        return val
+    s = str(val).strip().strip('="\'')
+    if not s:
+        return default
+    try:
+        return int(float(s))
+    except (ValueError, TypeError):
+        return default
+
 def safe_get(row, idx, default=None):
     if idx is not None and isinstance(idx, int) and 0 <= idx < len(row):
         val = row[idx]
@@ -42,8 +68,8 @@ def detect_sheet_and_headers(wb):
             continue
         sheet = wb[sheet_name]
         for row_idx, row in enumerate(sheet.iter_rows(max_row=25, values_only=True), start=1):
-            row_normalized = [normalize_header(cell) for cell in row if cell is not None]
-            if not row_normalized:
+            row_normalized = [normalize_header(cell) for cell in row]
+            if not any(row_normalized):
                 continue
             has_acc = any(pat in row_normalized for pat in header_patterns['account'])
             if not has_acc:
@@ -54,6 +80,8 @@ def detect_sheet_and_headers(wb):
                 matched_idx = None
                 for pat in patterns:
                     for i, val in enumerate(row_normalized):
+                        if not val:
+                            continue
                         if val == pat:
                             matched_idx = i
                             break
@@ -67,11 +95,16 @@ def detect_sheet_and_headers(wb):
             critical_keys = ['account', 'debit', 'credit', 'desc', 'creator']
             if all(detected_indices.get(k) is not None for k in critical_keys):
                 acc_col_idx = detected_indices['account']
+                rows_below = list(sheet.iter_rows(min_row=row_idx + 1, max_row=row_idx + 50, values_only=True))
                 has_values = False
-                for r_row in sheet.iter_rows(min_row=row_idx + 1, max_row=row_idx + 100, max_col=acc_col_idx + 1, values_only=True):
-                    if len(r_row) > acc_col_idx and r_row[acc_col_idx] is not None and str(r_row[acc_col_idx]).strip() != "":
-                        has_values = True
-                        break
+                for r_row in rows_below:
+                    if len(r_row) > acc_col_idx:
+                        v = r_row[acc_col_idx]
+                        if v is not None:
+                            v_str = str(v).strip().strip('="\'')
+                            if v_str != "":
+                                has_values = True
+                                break
                 if has_values:
                     return sheet_name, row_idx, detected_indices
                 
@@ -261,11 +294,11 @@ def main(input_path=None):
         backup_path = r'c:\Users\tuan2hm\Downloads\Linh Tinh\GL 0903 T4.2026_lech_08052026_backup.xlsx'
     
     # 1. Quản lý File Backup để tránh mất cache công thức của Excel gốc
-    if not os.path.exists(backup_path):
+    if not os.path.exists(backup_path) or (os.path.exists(file_path) and os.path.getmtime(file_path) >= os.path.getmtime(backup_path)):
         if not os.path.exists(file_path):
             print(f"Không tìm thấy file Excel tại: {file_path}")
             return None
-        print(f"Đang tạo bản sao lưu dữ liệu gốc lần đầu tiên tại: {backup_path}...")
+        print(f"Đang tạo bản sao lưu dữ liệu gốc tại: {backup_path}...")
         shutil.copy2(file_path, backup_path)
     else:
         print("Đã phát hiện file backup dữ liệu gốc. Tiến hành đọc dữ liệu từ file backup...")
@@ -273,8 +306,13 @@ def main(input_path=None):
     # 2. Đọc dữ liệu từ file backup với chế độ read_only=True để tối ưu hóa bộ nhớ
     print("Đang đọc dữ liệu gốc...")
     wb_read = openpyxl.load_workbook(backup_path, data_only=True, read_only=True)
-    
     source_sheet_name, header_row, indices = detect_sheet_and_headers(wb_read)
+    if not source_sheet_name:
+        wb_read.close()
+        # Fallback sang data_only=False nếu ô bị ẩn cache công thức kiểu = "33193000000"
+        wb_read = openpyxl.load_workbook(backup_path, data_only=False, read_only=True)
+        source_sheet_name, header_row, indices = detect_sheet_and_headers(wb_read)
+
     if not source_sheet_name:
         wb_read.close()
         print("Không tìm thấy sheet dữ liệu gốc hợp lệ hoặc lỗi cấu trúc cột trong file Excel.")
@@ -319,17 +357,20 @@ def main(input_path=None):
     all_creators = set()
     
     for row_num, row in enumerate(sheet.iter_rows(min_row=header_row + 1, values_only=True), start=header_row + 1):
-        if not row or len(row) <= acc_idx or not row[acc_idx]:
+        if not row or len(row) <= acc_idx or row[acc_idx] is None:
             continue
-        acc = str(row[acc_idx]).strip()
+        acc_raw = str(row[acc_idx]).strip().strip('="\'')
+        if not acc_raw:
+            continue
+        acc = acc_raw
         prefix = next((p for p in target_prefixes if acc.startswith(p)), None)
         if not prefix:
             continue
             
-        deb_val = safe_get(row, deb_idx, 0) or 0
-        cred_val = safe_get(row, cred_idx, 0) or 0
-        creator = str(safe_get(row, creator_idx, 'UNKNOWN')).strip() or 'UNKNOWN'
-        updater = str(safe_get(row, upd_idx, 'UNKNOWN')).strip() or 'UNKNOWN'
+        deb_val = parse_float(safe_get(row, deb_idx, 0))
+        cred_val = parse_float(safe_get(row, cred_idx, 0))
+        creator = str(safe_get(row, creator_idx, 'UNKNOWN')).strip().strip('="\'') or 'UNKNOWN'
+        updater = str(safe_get(row, upd_idx, 'UNKNOWN')).strip().strip('="\'') or 'UNKNOWN'
         all_creators.add(creator)
         
         # Chuyển đổi hạch toán âm (Negative Reversals)

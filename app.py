@@ -59,9 +59,12 @@ def load_and_calculate_data(file_path):
     source_path = backup_path if backup_path else file_path
     print(f"Reading source data for Table A from: {source_path}")
     wb_source = openpyxl.load_workbook(source_path, data_only=True, read_only=True)
-    
-    # 1. Đọc sheet nguồn gốc ban đầu để tính Bảng A (Tổng hợp phát sinh gốc)
     source_sheet_name, header_row, indices = loc_lech_taikhoan.detect_sheet_and_headers(wb_source)
+    if not source_sheet_name:
+        wb_source.close()
+        wb_source = openpyxl.load_workbook(source_path, data_only=False, read_only=True)
+        source_sheet_name, header_row, indices = loc_lech_taikhoan.detect_sheet_and_headers(wb_source)
+
     if not source_sheet_name:
         wb_source.close()
         raise ValueError("Không tìm thấy sheet dữ liệu gốc hợp lệ hoặc lỗi cấu trúc cột trong file Excel.")
@@ -85,17 +88,21 @@ def load_and_calculate_data(file_path):
     
     # Duyệt qua các dòng dữ liệu gốc từ dòng ngay sau dòng tiêu đề
     for row in sheet.iter_rows(min_row=header_row + 1, values_only=True):
-        if not row or len(row) <= acc_idx or not row[acc_idx]:
+        if not row or len(row) <= acc_idx or row[acc_idx] is None:
             continue
-        acc = str(row[acc_idx]).strip()
+        acc = str(row[acc_idx]).strip().strip('="\'')
+        if not acc:
+            continue
         
         # Thu thập Người tạo (Creator) xuất hiện trong hệ thống
         if len(row) > creator_idx and row[creator_idx] is not None:
-            all_creators.add(str(row[creator_idx]).strip())
+            c_val = str(row[creator_idx]).strip().strip('="\'')
+            if c_val:
+                all_creators.add(c_val)
             
         if acc in bang_a_data:
-            deb_val = float(row[deb_idx]) if len(row) > deb_idx and row[deb_idx] is not None else 0.0
-            cred_val = float(row[cred_idx]) if len(row) > cred_idx and row[cred_idx] is not None else 0.0
+            deb_val = loc_lech_taikhoan.parse_float(row[deb_idx]) if len(row) > deb_idx else 0.0
+            cred_val = loc_lech_taikhoan.parse_float(row[cred_idx]) if len(row) > cred_idx else 0.0
             
             bang_a_data[acc]["debit"] += deb_val
             bang_a_data[acc]["credit"] += cred_val
@@ -260,8 +267,13 @@ def upload_file():
         return jsonify({"success": False, "message": "Định dạng file không hợp lệ, vui lòng chọn file Excel .xlsx"}), 400
         
     try:
-        filename = get_safe_filename(file.filename)
-        filepath = os.path.join(UPLOAD_FOLDER, filename)
+        import time
+        timestamp = int(time.time() * 1000)
+        safe_name = get_safe_filename(file.filename)
+        name_without_ext, ext = os.path.splitext(safe_name)
+        
+        unique_filename = f"{name_without_ext}_{timestamp}{ext}"
+        filepath = os.path.join(UPLOAD_FOLDER, unique_filename)
         file.save(filepath)
         
         # Đọc thử file để kiểm tra cấu trúc sheet nguồn động
@@ -277,9 +289,8 @@ def upload_file():
                 "message": "Cấu trúc file không đúng! File phải chứa một sheet sổ cái GL hợp lệ có các cột tối thiểu: 'Tài khoản', 'Nợ quy đổi', 'Có quy đổi', 'Nội dung', 'Người tạo'."
             }), 400
             
-        # Tạo bản sao lưu backup ngay lập tức tại UPLOAD_FOLDER
-        name_without_ext, ext = os.path.splitext(filename)
-        backup_path = os.path.join(UPLOAD_FOLDER, f"{name_without_ext}_backup{ext}")
+        # Tạo bản sao lưu backup ngay lập tức tại UPLOAD_FOLDER với tên duy nhất
+        backup_path = os.path.join(UPLOAD_FOLDER, f"{name_without_ext}_{timestamp}_backup{ext}")
         shutil.copy2(filepath, backup_path)
         
         # Cập nhật trạng thái
