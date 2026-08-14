@@ -490,24 +490,58 @@ def main(input_path=None):
         for c in credits:
             c['matched'] = False
             
-        # Bước 2A: Ghép cặp chi tiết 1-1 chéo người tạo theo diễn giải tương đồng
+        # Bước 2A: Ghép cặp chi tiết 1-1 chéo người tạo (Tối ưu Hash Map theo số tiền)
+        credits_by_amount = {}
+        for c in credits:
+            if not c['matched']:
+                amt = round(c['cred'], 2)
+                if amt not in credits_by_amount:
+                    credits_by_amount[amt] = []
+                credits_by_amount[amt].append(c)
+
         for d in debits:
             if d['matched']:
                 continue
-            for c in credits:
-                if c['matched']:
-                    continue
-                if abs(d['deb'] - c['cred']) < 0.5:
-                    if are_similar(d['desc'], c['desc'], d['trans_num'], c['trans_num']):
-                        d['matched'] = True
-                        c['matched'] = True
-                        break
+            amt = round(d['deb'], 2)
+            if amt in credits_by_amount:
+                for c in credits_by_amount[amt]:
+                    if not c['matched']:
+                        if are_similar(d['desc'], c['desc'], d['trans_num'], c['trans_num']):
+                            d['matched'] = True
+                            c['matched'] = True
+                            break
                         
-        # Bước 2B: Ghép cặp chi tiết 1-nhiều chéo người tạo
+        # Bước 2B: Ghép cặp chi tiết 1-nhiều chéo người tạo (Tối ưu chỉ số ngược Keyword/TransNum)
+        credit_kw_index = {}
+        credit_tn_index = {}
+        for c in credits:
+            if not c['matched']:
+                tn = str(c.get('trans_num', '')).strip().lower()
+                if tn:
+                    if tn not in credit_tn_index:
+                        credit_tn_index[tn] = []
+                    credit_tn_index[tn].append(c)
+                kws = extract_keywords(c.get('desc', ''))
+                for kw in kws:
+                    if kw not in credit_kw_index:
+                        credit_kw_index[kw] = []
+                    credit_kw_index[kw].append(c)
+
         for d in debits:
             if d['matched']:
                 continue
-            similar_credits = [c for c in credits if not c['matched'] and are_similar(d['desc'], c['desc'], d['trans_num'], c['trans_num'])]
+            cand_dict = {}
+            tn = str(d.get('trans_num', '')).strip().lower()
+            if tn and tn in credit_tn_index:
+                for c in credit_tn_index[tn]:
+                    cand_dict[id(c)] = c
+            kws = extract_keywords(d.get('desc', ''))
+            for kw in kws:
+                if kw in credit_kw_index:
+                    for c in credit_kw_index[kw]:
+                        cand_dict[id(c)] = c
+            
+            similar_credits = [c for c in cand_dict.values() if not c['matched'] and are_similar(d['desc'], c['desc'], d['trans_num'], c['trans_num'])]
             if not similar_credits:
                 continue
             target = d['deb']
@@ -566,11 +600,37 @@ def main(input_path=None):
                 for idx in subset_indices:
                     similar_credits[idx]['matched'] = True
                     
-        # Bước 2C: Ghép cặp chi tiết nhiều-1 chéo người tạo
+        # Bước 2C: Ghép cặp chi tiết nhiều-1 chéo người tạo (Tối ưu chỉ số ngược Keyword/TransNum)
+        debit_kw_index = {}
+        debit_tn_index = {}
+        for d in debits:
+            if not d['matched']:
+                tn = str(d.get('trans_num', '')).strip().lower()
+                if tn:
+                    if tn not in debit_tn_index:
+                        debit_tn_index[tn] = []
+                    debit_tn_index[tn].append(d)
+                kws = extract_keywords(d.get('desc', ''))
+                for kw in kws:
+                    if kw not in debit_kw_index:
+                        debit_kw_index[kw] = []
+                    debit_kw_index[kw].append(d)
+
         for c in credits:
             if c['matched']:
                 continue
-            similar_debits = [d for d in debits if not d['matched'] and are_similar(d['desc'], c['desc'], d['trans_num'], c['trans_num'])]
+            cand_dict = {}
+            tn = str(c.get('trans_num', '')).strip().lower()
+            if tn and tn in debit_tn_index:
+                for d in debit_tn_index[tn]:
+                    cand_dict[id(d)] = d
+            kws = extract_keywords(c.get('desc', ''))
+            for kw in kws:
+                if kw in debit_kw_index:
+                    for d in debit_kw_index[kw]:
+                        cand_dict[id(d)] = d
+
+            similar_debits = [d for d in cand_dict.values() if not d['matched'] and are_similar(d['desc'], c['desc'], d['trans_num'], c['trans_num'])]
             if not similar_debits:
                 continue
             target = c['cred']
@@ -645,17 +705,26 @@ def main(input_path=None):
                     elif r['cred'] > 0:
                         all_unmatched_credits.append(r)
 
-    # Chạy đối chiếu chéo 1-1 khác tài khoản
+    # Chạy đối chiếu chéo 1-1 khác tài khoản (Tối ưu Hash Map theo số tiền)
     print("\nĐang chạy đối chiếu chéo tài khoản (Cross-Account Reconciliation)...")
+    unmatched_credits_by_amt = {}
+    for c in all_unmatched_credits:
+        if not c.get('matched', False):
+            amt = round(c['cred'], 2)
+            if amt not in unmatched_credits_by_amt:
+                unmatched_credits_by_amt[amt] = []
+            unmatched_credits_by_amt[amt].append(c)
+
     for d in all_unmatched_debits:
         if d.get('matched', False):
             continue
-        for c in all_unmatched_credits:
-            if c.get('matched', False):
-                continue
-            if d['acc'] == c['acc']:
-                continue  # Chỉ ghép chéo khác tài khoản
-            if abs(d['deb'] - c['cred']) < 0.5:
+        amt = round(d['deb'], 2)
+        if amt in unmatched_credits_by_amt:
+            for c in unmatched_credits_by_amt[amt]:
+                if c.get('matched', False):
+                    continue
+                if d['acc'] == c['acc']:
+                    continue  # Chỉ ghép chéo khác tài khoản
                 if are_similar(d['desc'], c['desc'], d['trans_num'], c['trans_num']):
                     d['matched'] = True
                     c['matched'] = True
@@ -673,13 +742,17 @@ def main(input_path=None):
             acc_unpaired.sort(key=lambda x: x['row_num'])
             unpaired_transactions[acc] = acc_unpaired
             
-    # 3. Tạo Workbook mới dựa trên bản backup nguyên vẹn để ghi đè báo cáo mới
-    wb_write = openpyxl.load_workbook(backup_path)
-    
-    # Xóa các sheet cũ nếu có
-    for sh_name in ['DoiChieu_TKTG', 'ChiTiet_GiaoDich_Lech', 'Data_Unpaired']:
-        if sh_name in wb_write.sheetnames:
-            del wb_write[sh_name]
+    # 3. Tạo Workbook mới để ghi đè báo cáo đối chiếu
+    if os.path.exists(backup_path) and os.path.getsize(backup_path) < 5 * 1024 * 1024:
+        wb_write = openpyxl.load_workbook(backup_path)
+        for sh_name in ['DoiChieu_TKTG', 'ChiTiet_GiaoDich_Lech', 'Data_Unpaired']:
+            if sh_name in wb_write.sheetnames:
+                del wb_write[sh_name]
+    else:
+        # Với file lớn (>= 5MB, >15,000 dòng): Tạo mới để lưu cực nhanh (dưới 1 giây thay vì 66 giây)
+        wb_write = openpyxl.Workbook()
+        if 'Sheet' in wb_write.sheetnames:
+            del wb_write['Sheet']
             
     # ----------------------------------------------------
     # SHEET PHỤ: Data_Unpaired (Chứa dữ liệu thô của giao dịch bị lệch thực tế)
@@ -1084,46 +1157,22 @@ def main(input_path=None):
             curr_row += 3
             
     # ----------------------------------------------------
-    # TỰ ĐỘNG CĂN CHỈNH ĐỘ RỘNG CỘT (AUTO-FIT COLUMNS)
+    # TỰ ĐỘNG CĂN CHỈNH ĐỘ RỘNG CỘT (AUTO-FIT COLUMNS EXPLICIT)
     # ----------------------------------------------------
-    for col in ws_dash.columns:
-        col_letter = get_column_letter(col[0].column)
-        if col_letter in ['A', 'G']: 
-            ws_dash.column_dimensions[col_letter].width = 3
-            continue
-        max_len = 0
-        for cell in col:
-            if cell.row in [2, 3, 22, 23, 24, 25] or (cell.value and str(cell.value).startswith('=')):
-                continue
-            if cell.value is not None:
-                max_len = max(max_len, len(str(cell.value)))
-        ws_dash.column_dimensions[col_letter].width = max(max_len + 4, 12)
-        
+    ws_dash.column_dimensions['A'].width = 3
     ws_dash.column_dimensions['B'].width = 25
     ws_dash.column_dimensions['C'].width = 20
     ws_dash.column_dimensions['D'].width = 18
     ws_dash.column_dimensions['E'].width = 18
     ws_dash.column_dimensions['F'].width = 15
+    ws_dash.column_dimensions['G'].width = 3
     ws_dash.column_dimensions['H'].width = 25
     ws_dash.column_dimensions['I'].width = 18
     ws_dash.column_dimensions['J'].width = 18
     ws_dash.column_dimensions['K'].width = 18
     ws_dash.column_dimensions['L'].width = 15
     
-    for col in ws_detail.columns:
-        col_letter = get_column_letter(col[0].column)
-        if col_letter in ['A']:
-            ws_detail.column_dimensions[col_letter].width = 3
-            continue
-        max_len = 0
-        for cell in col:
-            if cell.row in [2, 3] or (cell.value and str(cell.value).startswith('=')):
-                continue
-            if cell.value is not None:
-                max_len = max(max_len, len(str(cell.value)))
-        ws_detail.column_dimensions[col_letter].width = max(max_len + 4, 12)
-        
-    ws_detail.column_dimensions['I'].width = 50
+    ws_detail.column_dimensions['A'].width = 3
     ws_detail.column_dimensions['B'].width = 15
     ws_detail.column_dimensions['C'].width = 15
     ws_detail.column_dimensions['D'].width = 15
@@ -1131,6 +1180,7 @@ def main(input_path=None):
     ws_detail.column_dimensions['F'].width = 18
     ws_detail.column_dimensions['G'].width = 25
     ws_detail.column_dimensions['H'].width = 25
+    ws_detail.column_dimensions['I'].width = 50
 
     # 4. Ghi file Excel với cơ chế fallback phòng khi bị khóa file
     saved_successfully = False
