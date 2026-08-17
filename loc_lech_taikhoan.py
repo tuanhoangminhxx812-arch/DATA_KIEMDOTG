@@ -407,6 +407,12 @@ def main(input_path=None):
         
     wb_read.close()
     
+    # Pre-compute text caches cho tất cả rows trước khi chạy matching → tránh tính lại hàng ngàn lần
+    for acc in results:
+        for creator, rows in results[acc].items():
+            for r in rows:
+                prepare_row_cache(r)
+    
     print("Đang chạy thuật toán đối ứng đa cấp (Creator-Level & Transaction-Level Pairing)...")
     unpaired_transactions = {}
     
@@ -506,7 +512,7 @@ def main(input_path=None):
             if amt in credits_by_amount:
                 for c in credits_by_amount[amt]:
                     if not c['matched']:
-                        if are_similar(d['desc'], c['desc'], d['trans_num'], c['trans_num']):
+                        if are_similar(d, c):
                             d['matched'] = True
                             c['matched'] = True
                             break
@@ -541,7 +547,7 @@ def main(input_path=None):
                     for c in credit_kw_index[kw]:
                         cand_dict[id(c)] = c
             
-            similar_credits = [c for c in cand_dict.values() if not c['matched'] and are_similar(d['desc'], c['desc'], d['trans_num'], c['trans_num'])]
+            similar_credits = [c for c in cand_dict.values() if not c['matched'] and are_similar(d, c)]
             if not similar_credits:
                 continue
             target = d['deb']
@@ -630,7 +636,7 @@ def main(input_path=None):
                     for d in debit_kw_index[kw]:
                         cand_dict[id(d)] = d
 
-            similar_debits = [d for d in cand_dict.values() if not d['matched'] and are_similar(d['desc'], c['desc'], d['trans_num'], c['trans_num'])]
+            similar_debits = [d for d in cand_dict.values() if not d['matched'] and are_similar(d, c)]
             if not similar_debits:
                 continue
             target = c['cred']
@@ -725,7 +731,7 @@ def main(input_path=None):
                     continue
                 if d['acc'] == c['acc']:
                     continue  # Chỉ ghép chéo khác tài khoản
-                if are_similar(d['desc'], c['desc'], d['trans_num'], c['trans_num']):
+                if are_similar(d, c):
                     d['matched'] = True
                     c['matched'] = True
                     print(f"  [Khớp Chéo] TK {d['acc']} (Dòng {d['row_num']}, Nợ {d['deb']:,.0f}) <-> TK {c['acc']} (Dòng {c['row_num']}, Có {c['cred']:,.0f})")
@@ -743,16 +749,11 @@ def main(input_path=None):
             unpaired_transactions[acc] = acc_unpaired
             
     # 3. Tạo Workbook mới để ghi đè báo cáo đối chiếu
-    if os.path.exists(backup_path) and os.path.getsize(backup_path) < 5 * 1024 * 1024:
-        wb_write = openpyxl.load_workbook(backup_path)
-        for sh_name in ['DoiChieu_TKTG', 'ChiTiet_GiaoDich_Lech', 'Data_Unpaired']:
-            if sh_name in wb_write.sheetnames:
-                del wb_write[sh_name]
-    else:
-        # Với file lớn (>= 5MB, >15,000 dòng): Tạo mới để lưu cực nhanh (dưới 1 giây thay vì 66 giây)
-        wb_write = openpyxl.Workbook()
-        if 'Sheet' in wb_write.sheetnames:
-            del wb_write['Sheet']
+    # Luôn tạo workbook mới → tốc độ ghi tăng từ ~60 giây xuống < 1 giây
+    # (Dữ liệu gốc đã được bảo toàn trong file backup riêng)
+    wb_write = openpyxl.Workbook()
+    if 'Sheet' in wb_write.sheetnames:
+        del wb_write['Sheet']
             
     # ----------------------------------------------------
     # SHEET PHỤ: Data_Unpaired (Chứa dữ liệu thô của giao dịch bị lệch thực tế)
@@ -891,11 +892,11 @@ def main(input_path=None):
         r = start_row_left + idx
         ws_dash.cell(row=r, column=2, value=acc).font = bold_font
         
-        c_deb = ws_dash.cell(row=r, column=3, value=f"=SUMIF('{source_sheet_name}'!{acc_col}:{acc_col}, B{r}, '{source_sheet_name}'!{deb_col}:{deb_col})")
+        c_deb = ws_dash.cell(row=r, column=3, value=account_totals[acc]['deb'])
         c_deb.number_format = '#,##0'
         c_deb.font = normal_font
         
-        c_cred = ws_dash.cell(row=r, column=4, value=f"=SUMIF('{source_sheet_name}'!{acc_col}:{acc_col}, B{r}, '{source_sheet_name}'!{cred_col}:{cred_col})")
+        c_cred = ws_dash.cell(row=r, column=4, value=account_totals[acc]['cred'])
         c_cred.number_format = '#,##0'
         c_cred.font = normal_font
         
