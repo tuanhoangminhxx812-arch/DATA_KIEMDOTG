@@ -22,12 +22,13 @@ document.addEventListener('DOMContentLoaded', () => {
     initApp();
 });
 
-// Hàm gửi tin nhắn về Python Streamlit
+// Hàm gửi tin nhắn về Python Streamlit với action_id duy nhất để chống lặp vô tận
 function sendToStreamlit(action, payload = {}) {
+    const actionId = Date.now() + "_" + Math.random().toString(36).substring(2, 9);
     window.parent.postMessage({
         isStreamlitMessage: true,
         type: "streamlit:setComponentValue",
-        value: { action, ...payload }
+        value: { action, action_id: actionId, ...payload }
     }, "*");
 }
 

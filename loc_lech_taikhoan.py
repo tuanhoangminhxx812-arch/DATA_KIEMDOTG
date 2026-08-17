@@ -330,7 +330,7 @@ def main(input_path=None, output_path=None):
     deb_col = get_column_letter(deb_idx + 1)
     cred_col = get_column_letter(cred_idx + 1)
         
-    target_prefixes = ('33191', '33192', '33193', '33194', '33196', '33198', '2419', '1510', '1511', '1519', '1419', '1131')
+    target_prefixes = ('33191', '33192', '33193', '33194', '33195', '33196', '33198', '2419', '1510', '1511', '1519', '1419', '1131')
     intermediate_accounts = [
         '11310000000',
         '14190000000',
@@ -360,7 +360,7 @@ def main(input_path=None, output_path=None):
             continue
         acc = acc_raw
         prefix = next((p for p in target_prefixes if acc.startswith(p)), None)
-        if not prefix:
+        if not prefix and acc not in intermediate_accounts:
             continue
             
         deb_val = parse_float(safe_get(row, deb_idx, 0))
