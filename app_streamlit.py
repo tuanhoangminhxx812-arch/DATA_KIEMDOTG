@@ -2,6 +2,7 @@ import os
 import io
 import tempfile
 import base64
+import traceback
 import openpyxl
 import pandas as pd
 import streamlit as st
@@ -71,9 +72,16 @@ has_non_ascii = any(ord(char) > 127 for char in build_dir) or " " in build_dir
 if has_non_ascii:
     temp_custom_ui_dir = os.path.join(tempfile.gettempdir(), "kiemdo_custom_ui")
     try:
-        if os.path.exists(temp_custom_ui_dir):
-            shutil.rmtree(temp_custom_ui_dir)
-        shutil.copytree(build_dir, temp_custom_ui_dir)
+        # Chỉ copy lại nếu thư mục tạm chưa tồn tại hoặc file nguồn mới hơn
+        needs_copy = not os.path.exists(temp_custom_ui_dir)
+        if not needs_copy:
+            src_mtime = max(os.path.getmtime(os.path.join(build_dir, f)) for f in os.listdir(build_dir))
+            dst_mtime = max(os.path.getmtime(os.path.join(temp_custom_ui_dir, f)) for f in os.listdir(temp_custom_ui_dir) if os.path.isfile(os.path.join(temp_custom_ui_dir, f)))
+            needs_copy = src_mtime > dst_mtime
+        if needs_copy:
+            if os.path.exists(temp_custom_ui_dir):
+                shutil.rmtree(temp_custom_ui_dir)
+            shutil.copytree(build_dir, temp_custom_ui_dir)
         build_dir = temp_custom_ui_dir
     except Exception as e:
         st.warning(f"Không thể copy thư mục custom_ui sang thư mục tạm: {str(e)}")
@@ -511,22 +519,36 @@ if response:
     elif action == "analyze":
         if st.session_state.temp_original_filepath:
             try:
-                # Chạy thuật toán loc_lech_taikhoan
-                saved_path = loc_lech_taikhoan.main(st.session_state.temp_original_filepath)
-                st.session_state.temp_analyzed_filepath = saved_path
-                
-                # Tính toán số liệu chênh lệch
-                analysis_data = load_and_calculate_data(
-                    saved_path,
-                    st.session_state.temp_original_filepath
-                )
-                
-                st.session_state.ui_state["has_analyzed"] = True
-                st.session_state.ui_state["analysis_data"] = analysis_data
-                st.session_state.ui_state["download_trigger"] = None
-                st.rerun()
+                # Kiểm tra file tạm có tồn tại không (trên Cloud có thể bị mất sau reboot)
+                if not os.path.exists(st.session_state.temp_original_filepath):
+                    st.session_state.ui_state["uploaded_filename"] = None
+                    st.session_state.ui_state["has_analyzed"] = False
+                    st.session_state.ui_state["analysis_data"] = None
+                    st.error("File tạm đã bị mất (Streamlit Cloud tự xóa). Vui lòng tải lại file Excel.")
+                    st.rerun()
+                else:
+                    # Chạy thuật toán loc_lech_taikhoan
+                    saved_path = loc_lech_taikhoan.main(st.session_state.temp_original_filepath)
+                    
+                    if not saved_path or not os.path.exists(saved_path):
+                        st.error("Thuật toán chạy xong nhưng không lưu được file kết quả. Vui lòng tải lại file và thử lại.")
+                    else:
+                        st.session_state.temp_analyzed_filepath = saved_path
+                        
+                        # Tính toán số liệu chênh lệch
+                        analysis_data = load_and_calculate_data(
+                            saved_path,
+                            st.session_state.temp_original_filepath
+                        )
+                        
+                        st.session_state.ui_state["has_analyzed"] = True
+                        st.session_state.ui_state["analysis_data"] = analysis_data
+                        st.session_state.ui_state["download_trigger"] = None
+                        st.rerun()
             except Exception as e:
+                error_detail = traceback.format_exc()
                 st.error(f"Lỗi phân tích đối chiếu: {str(e)}")
+                print(f"[ANALYZE ERROR] {error_detail}")
                 
     elif action == "export":
         account = response.get("account")

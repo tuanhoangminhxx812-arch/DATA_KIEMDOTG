@@ -153,6 +153,12 @@ function handleStreamlitState(st) {
         const spinnerIcon = el.btnAnalyze.querySelector('.icon-spin-target');
         if (spinnerIcon) spinnerIcon.classList.remove('spin');
         
+        // Hủy safety timeout nếu còn
+        if (state._analyzeTimeout) {
+            clearTimeout(state._analyzeTimeout);
+            state._analyzeTimeout = null;
+        }
+        
         // Vẽ lại giao diện
         renderAll();
     }
@@ -241,6 +247,19 @@ function registerEvents(el) {
         
         const spinnerIcon = el.btnAnalyze.querySelector('.icon-spin-target');
         if (spinnerIcon) spinnerIcon.classList.add('spin');
+        
+        // Safety timeout: tự động reset loading nếu quá 120 giây không có phản hồi
+        if (state._analyzeTimeout) clearTimeout(state._analyzeTimeout);
+        state._analyzeTimeout = setTimeout(() => {
+            if (el.loadingState.style.display !== 'none') {
+                el.loadingState.style.display = 'none';
+                el.emptyState.style.display = 'flex';
+                el.btnAnalyze.disabled = false;
+                el.btnSelectExcel.disabled = false;
+                if (spinnerIcon) spinnerIcon.classList.remove('spin');
+                showToast('Phân tích quá lâu, vui lòng tải lại file và thử lại!', 'error');
+            }
+        }, 120000);
         
         // Gửi yêu cầu phân tích về Python
         sendToStreamlit("analyze");
