@@ -276,7 +276,7 @@ def find_subset_sum(numbers, target, max_size=6, tolerance=0.5):
 
 
 
-def main(input_path=None):
+def main(input_path=None, output_path=None):
     if hasattr(sys.stdout, 'reconfigure'):
         try:
             sys.stdout.reconfigure(encoding='utf-8')
@@ -285,38 +285,34 @@ def main(input_path=None):
     
     if input_path is not None:
         file_path = os.path.abspath(input_path)
-        base_dir = os.path.dirname(file_path)
-        base_name = os.path.basename(file_path)
-        name_without_ext, ext = os.path.splitext(base_name)
-        backup_path = os.path.join(base_dir, f"{name_without_ext}_backup{ext}")
     else:
-        file_path = r'c:\Users\tuan2hm\Downloads\Linh Tinh\GL 0903 T4.2026_lech_08052026.xlsx'
-        backup_path = r'c:\Users\tuan2hm\Downloads\Linh Tinh\GL 0903 T4.2026_lech_08052026_backup.xlsx'
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        file_path = os.path.join(base_dir, 'GL 0903 T4.2026_lech_08052026.xlsx')
     
-    # 1. Quản lý File Backup để tránh mất cache công thức của Excel gốc
-    if not os.path.exists(backup_path) or (os.path.exists(file_path) and os.path.getmtime(file_path) >= os.path.getmtime(backup_path)):
-        if not os.path.exists(file_path):
-            print(f"Không tìm thấy file Excel tại: {file_path}")
-            return None
-        print(f"Đang tạo bản sao lưu dữ liệu gốc tại: {backup_path}...")
-        shutil.copy2(file_path, backup_path)
-    else:
-        print("Đã phát hiện file backup dữ liệu gốc. Tiến hành đọc dữ liệu từ file backup...")
-
-    # 2. Đọc dữ liệu từ file backup với chế độ read_only=True để tối ưu hóa bộ nhớ
-    print("Đang đọc dữ liệu gốc...")
-    wb_read = openpyxl.load_workbook(backup_path, data_only=True, read_only=True)
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"Không tìm thấy file Excel tại: {file_path}")
+        
+    base_dir = os.path.dirname(file_path)
+    base_name = os.path.basename(file_path)
+    name_without_ext, ext = os.path.splitext(base_name)
+    
+    # Đọc dữ liệu từ file với chế độ read_only=True để tối ưu hóa bộ nhớ và tốc độ
+    print(f"Đang đọc dữ liệu gốc từ: {file_path}...")
+    wb_read = openpyxl.load_workbook(file_path, data_only=True, read_only=True)
     source_sheet_name, header_row, indices = detect_sheet_and_headers(wb_read)
     if not source_sheet_name:
         wb_read.close()
-        # Fallback sang data_only=False nếu ô bị ẩn cache công thức kiểu = "33193000000"
-        wb_read = openpyxl.load_workbook(backup_path, data_only=False, read_only=True)
+        # Fallback sang data_only=False nếu ô bị ẩn cache công thức
+        wb_read = openpyxl.load_workbook(file_path, data_only=False, read_only=True)
         source_sheet_name, header_row, indices = detect_sheet_and_headers(wb_read)
 
     if not source_sheet_name:
         wb_read.close()
-        print("Không tìm thấy sheet dữ liệu gốc hợp lệ hoặc lỗi cấu trúc cột trong file Excel.")
-        return None
+        raise ValueError(
+            "Cấu trúc file không đúng! File phải chứa một sheet sổ cái (GL) hợp lệ "
+            "có các cột: 'Tài khoản', 'Nợ quy đổi', 'Có quy đổi', 'Nội dung', 'Người tạo'. "
+            "Nếu bạn đang chọn file kết quả đối chiếu cũ, vui lòng chọn file Excel dữ liệu gốc ban đầu."
+        )
         
     sheet = wb_read[source_sheet_name]
     
@@ -1191,17 +1187,18 @@ def main(input_path=None):
     base_name = os.path.basename(file_path)
     name_without_ext, ext = os.path.splitext(base_name)
     
-    paths_to_try = [
-        file_path,
-        os.path.join(base_dir, f"{name_without_ext}_DoiChieu{ext}")
-    ]
-    
-    # Thêm các tên file phụ dự phòng
-    for i in range(1, 10):
-        paths_to_try.append(os.path.join(base_dir, f"{name_without_ext}_DoiChieu_{i}{ext}"))
+    paths_to_try = []
+    if output_path:
+        paths_to_try.append(os.path.abspath(output_path))
+    else:
+        paths_to_try.append(os.path.join(base_dir, f"{name_without_ext}_DoiChieu{ext}"))
+        for i in range(1, 10):
+            paths_to_try.append(os.path.join(base_dir, f"{name_without_ext}_DoiChieu_{i}{ext}"))
         
     for p in paths_to_try:
         try:
+            # Tạo thư mục cha nếu chưa có
+            os.makedirs(os.path.dirname(p), exist_ok=True)
             print(f"Đang lưu báo cáo đối chiếu vào: {p}...")
             wb_write.save(p)
             print(f"==> ĐÃ LƯU THÀNH CÔNG TẠI: {p}")
@@ -1210,9 +1207,11 @@ def main(input_path=None):
             break
         except PermissionError:
             print(f"[CẢNH BÁO] File đang bị khóa hoặc không có quyền ghi: {p}")
+        except Exception as e:
+            print(f"[CẢNH BÁO] Không thể lưu file {p}: {str(e)}")
             
     if not saved_successfully:
-        print("\n[CỰC KỲ NGUY CẤP] Tất cả các file dự phòng đều bị khóa! Anh vui lòng đóng các file Excel đang mở và chạy lại nhé.")
+        raise PermissionError("Tất cả các file đích đều bị khóa hoặc không có quyền ghi! Vui lòng đóng Excel đang mở và thử lại.")
         
     print("\n=== HOÀN THÀNH XỬ LÝ ===")
     return saved_path

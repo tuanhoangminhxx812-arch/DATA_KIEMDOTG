@@ -120,7 +120,19 @@ function initApp() {
 function handleStreamlitState(st) {
     const el = window.appElements;
     
-    // 1. Quản lý trạng thái File Đã Tải Lên
+    // 1. Quản lý thông báo lỗi nếu có
+    if (st.error_message) {
+        el.loadingState.style.display = 'none';
+        el.btnAnalyze.disabled = !st.uploaded_filename;
+        el.btnSelectExcel.disabled = false;
+        const spinnerIcon = el.btnAnalyze.querySelector('.icon-spin-target');
+        if (spinnerIcon) spinnerIcon.classList.remove('spin');
+        
+        showToast(st.error_message, "error");
+        sendToStreamlit("clear_error");
+    }
+
+    // 2. Quản lý trạng thái File Đã Tải Lên
     if (st.uploaded_filename) {
         state.fileUploaded = true;
         el.currentFilename.innerText = `File đang tải: ${st.uploaded_filename}`;
@@ -141,7 +153,7 @@ function handleStreamlitState(st) {
         resetFilters();
     }
     
-    // 2. Quản lý kết quả phân tích đối chiếu chéo
+    // 3. Quản lý kết quả phân tích đối chiếu chéo
     if (st.has_analyzed && st.analysis_data) {
         state.hasAnalyzed = true;
         state.data = st.analysis_data;
@@ -153,17 +165,11 @@ function handleStreamlitState(st) {
         const spinnerIcon = el.btnAnalyze.querySelector('.icon-spin-target');
         if (spinnerIcon) spinnerIcon.classList.remove('spin');
         
-        // Hủy safety timeout nếu còn
-        if (state._analyzeTimeout) {
-            clearTimeout(state._analyzeTimeout);
-            state._analyzeTimeout = null;
-        }
-        
         // Vẽ lại giao diện
         renderAll();
     }
     
-    // 3. Kích hoạt tải xuống Excel in-memory serverless khi Python gửi Base64 về
+    // 4. Kích hoạt tải xuống Excel in-memory serverless khi Python gửi Base64 về
     if (st.download_trigger) {
         triggerDownload(st.download_trigger.filename, st.download_trigger.data);
         // Báo cho Python là tải xong để reset trigger trong session_state
@@ -247,19 +253,6 @@ function registerEvents(el) {
         
         const spinnerIcon = el.btnAnalyze.querySelector('.icon-spin-target');
         if (spinnerIcon) spinnerIcon.classList.add('spin');
-        
-        // Safety timeout: tự động reset loading nếu quá 120 giây không có phản hồi
-        if (state._analyzeTimeout) clearTimeout(state._analyzeTimeout);
-        state._analyzeTimeout = setTimeout(() => {
-            if (el.loadingState.style.display !== 'none') {
-                el.loadingState.style.display = 'none';
-                el.emptyState.style.display = 'flex';
-                el.btnAnalyze.disabled = false;
-                el.btnSelectExcel.disabled = false;
-                if (spinnerIcon) spinnerIcon.classList.remove('spin');
-                showToast('Phân tích quá lâu, vui lòng tải lại file và thử lại!', 'error');
-            }
-        }, 120000);
         
         // Gửi yêu cầu phân tích về Python
         sendToStreamlit("analyze");

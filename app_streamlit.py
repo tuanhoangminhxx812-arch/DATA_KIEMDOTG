@@ -2,7 +2,6 @@ import os
 import io
 import tempfile
 import base64
-import traceback
 import openpyxl
 import pandas as pd
 import streamlit as st
@@ -72,16 +71,9 @@ has_non_ascii = any(ord(char) > 127 for char in build_dir) or " " in build_dir
 if has_non_ascii:
     temp_custom_ui_dir = os.path.join(tempfile.gettempdir(), "kiemdo_custom_ui")
     try:
-        # Chỉ copy lại nếu thư mục tạm chưa tồn tại hoặc file nguồn mới hơn
-        needs_copy = not os.path.exists(temp_custom_ui_dir)
-        if not needs_copy:
-            src_mtime = max(os.path.getmtime(os.path.join(build_dir, f)) for f in os.listdir(build_dir))
-            dst_mtime = max(os.path.getmtime(os.path.join(temp_custom_ui_dir, f)) for f in os.listdir(temp_custom_ui_dir) if os.path.isfile(os.path.join(temp_custom_ui_dir, f)))
-            needs_copy = src_mtime > dst_mtime
-        if needs_copy:
-            if os.path.exists(temp_custom_ui_dir):
-                shutil.rmtree(temp_custom_ui_dir)
-            shutil.copytree(build_dir, temp_custom_ui_dir)
+        if os.path.exists(temp_custom_ui_dir):
+            shutil.rmtree(temp_custom_ui_dir)
+        shutil.copytree(build_dir, temp_custom_ui_dir)
         build_dir = temp_custom_ui_dir
     except Exception as e:
         st.warning(f"Không thể copy thư mục custom_ui sang thư mục tạm: {str(e)}")
@@ -89,18 +81,8 @@ if has_non_ascii:
 my_ui = components.declare_component("my_ui", path=build_dir)
 
 # --- HÀM TÍNH TOÁN DỮ LIỆU ĐỒNG BỘ 100% VỚI EXCEL ---
-def load_and_calculate_data(file_path, original_filepath):
-    # Tìm backup path để đọc dữ liệu gốc có cache công thức
-    backup_path = None
-    if original_filepath:
-        orig_dir = os.path.dirname(original_filepath)
-        orig_name = os.path.basename(original_filepath)
-        orig_without_ext, orig_ext = os.path.splitext(orig_name)
-        candidate = os.path.join(orig_dir, f"{orig_without_ext}_backup{orig_ext}")
-        if os.path.exists(candidate):
-            backup_path = candidate
-            
-    source_path = backup_path if backup_path else file_path
+def load_and_calculate_data(analyzed_filepath, original_filepath=None):
+    source_path = original_filepath if original_filepath and os.path.exists(original_filepath) else analyzed_filepath
     
     wb_source = openpyxl.load_workbook(source_path, data_only=True, read_only=True)
     source_sheet_name, header_row, indices = loc_lech_taikhoan.detect_sheet_and_headers(wb_source)
@@ -160,7 +142,7 @@ def load_and_calculate_data(file_path, original_filepath):
         item["status"] = "Lệch số" if abs(round(item["diff"], 2)) != 0 else "Khớp"
 
     # 2. Đọc sheet Data_Unpaired lấy giao dịch chưa khớp
-    wb = openpyxl.load_workbook(file_path, data_only=True, read_only=True)
+    wb = openpyxl.load_workbook(analyzed_filepath, data_only=True, read_only=True)
     if 'Data_Unpaired' not in wb.sheetnames:
         wb.close()
         raise ValueError("Ứng dụng chưa được Phân Tích Đối Chiếu. Vui lòng bấm nút Phân Tích.")
@@ -463,119 +445,158 @@ def generate_excel_in_memory(account, creator, analyzed_filepath):
     output.seek(0)
     return output.getvalue()
 
-# --- KHỞI TẠO STATE VÀ XỬ LÝ ĐỐI CHIẾU MÁY THÀNH VIÊN ---
-if "ui_state" not in st.session_state:
-    st.session_state.ui_state = {
-        "uploaded_filename": None,
-        "has_analyzed": False,
-        "analysis_data": None,
-        "download_trigger": None
-    }
+# --- HÀM MAIN THỰC THI CHÍNH TRÊN STREAMLIT ---
+def main():
+    if "ui_state" not in st.session_state:
+        st.session_state.ui_state = {
+            "uploaded_filename": None,
+            "has_analyzed": False,
+            "analysis_data": None,
+            "download_trigger": None,
+            "error_message": None
+        }
 
-if "temp_original_filepath" not in st.session_state:
-    st.session_state.temp_original_filepath = None
-if "temp_backup_filepath" not in st.session_state:
-    st.session_state.temp_backup_filepath = None
-if "temp_analyzed_filepath" not in st.session_state:
-    st.session_state.temp_analyzed_filepath = None
+    if "temp_original_filepath" not in st.session_state:
+        st.session_state.temp_original_filepath = None
+    if "temp_analyzed_filepath" not in st.session_state:
+        st.session_state.temp_analyzed_filepath = None
 
-# Render custom component và nhận phản hồi từ iframe
-response = my_ui(state=st.session_state.ui_state, key="my_ui_iframe", height=1000)
+    # Render custom component và nhận phản hồi từ iframe
+    response = my_ui(state=st.session_state.ui_state, key="my_ui_iframe", height=1000)
 
-# Xử lý các sự kiện truyền thông điệp của iframe
-if response:
-    action = response.get("action")
-    
-    if action == "upload":
-        filename = response.get("filename")
-        base64_data = response.get("data")
+    # Xử lý các sự kiện truyền thông điệp của iframe
+    if response:
+        action = response.get("action")
         
-        if filename and base64_data:
-            file_bytes = base64.b64decode(base64_data)
+        if action == "upload":
+            filename = response.get("filename")
+            base64_data = response.get("data")
             
-            # Tạo file tạm thời để chạy đối chiếu chéo
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
-                tmp.write(file_bytes)
-                st.session_state.temp_original_filepath = tmp.name
+            if filename and base64_data:
+                try:
+                    file_bytes = base64.b64decode(base64_data)
+                    
+                    # Tạo file tạm thời để lưu dữ liệu gốc
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
+                        tmp.write(file_bytes)
+                        tmp_path = tmp.name
+                    
+                    # Kiểm tra cấu trúc file Excel ngay lập tức
+                    wb_test = openpyxl.load_workbook(tmp_path, data_only=True, read_only=True)
+                    s_name, _, _ = loc_lech_taikhoan.detect_sheet_and_headers(wb_test)
+                    if not s_name:
+                        wb_test.close()
+                        wb_test = openpyxl.load_workbook(tmp_path, data_only=False, read_only=True)
+                        s_name, _, _ = loc_lech_taikhoan.detect_sheet_and_headers(wb_test)
+                    wb_test.close()
+                    
+                    if not s_name:
+                        try:
+                            os.remove(tmp_path)
+                        except Exception:
+                            pass
+                        st.session_state.ui_state["uploaded_filename"] = None
+                        st.session_state.ui_state["has_analyzed"] = False
+                        st.session_state.ui_state["analysis_data"] = None
+                        st.session_state.ui_state["error_message"] = (
+                            "Cấu trúc file không đúng! File phải chứa một sheet sổ cái (GL) hợp lệ có các cột: "
+                            "'Tài khoản', 'Nợ quy đổi', 'Có quy đổi', 'Nội dung', 'Người tạo'. "
+                            "Nếu bạn đang chọn file kết quả đối chiếu, vui lòng chọn file Excel dữ liệu gốc ban đầu."
+                        )
+                        st.rerun()
+                        return
+                        
+                    st.session_state.temp_original_filepath = tmp_path
+                    st.session_state.ui_state["uploaded_filename"] = filename
+                    st.session_state.ui_state["has_analyzed"] = False
+                    st.session_state.ui_state["analysis_data"] = None
+                    st.session_state.ui_state["error_message"] = None
+                    st.session_state.ui_state["download_trigger"] = None
+                    st.rerun()
+                except Exception as e:
+                    st.session_state.ui_state["error_message"] = f"Lỗi đọc file upload: {str(e)}"
+                    st.rerun()
                 
-                # Tạo file backup ngay tại thư mục tạm để loc_lech_taikhoan tìm thấy
-                base_dir = os.path.dirname(tmp.name)
-                base_name = os.path.basename(tmp.name)
-                name_without_ext, ext = os.path.splitext(base_name)
-                backup_path = os.path.join(base_dir, f"{name_without_ext}_backup{ext}")
+        elif action == "analyze":
+            if st.session_state.temp_original_filepath and os.path.exists(st.session_state.temp_original_filepath):
+                try:
+                    # Tạo file đích riêng biệt để không ghi đè dữ liệu gốc
+                    orig_path = st.session_state.temp_original_filepath
+                    orig_dir = os.path.dirname(orig_path)
+                    orig_base = os.path.basename(orig_path)
+                    name_no_ext, ext = os.path.splitext(orig_base)
+                    analyzed_path = os.path.join(orig_dir, f"{name_no_ext}_analyzed{ext}")
+                    
+                    # Chạy thuật toán loc_lech_taikhoan
+                    saved_path = loc_lech_taikhoan.main(
+                        input_path=orig_path,
+                        output_path=analyzed_path
+                    )
+                    
+                    if not saved_path or not os.path.exists(saved_path):
+                        raise ValueError("Không thể tạo file báo cáo đối chiếu.")
+                        
+                    st.session_state.temp_analyzed_filepath = saved_path
+                    
+                    # Tính toán số liệu chênh lệch
+                    analysis_data = load_and_calculate_data(
+                        saved_path,
+                        orig_path
+                    )
+                    
+                    st.session_state.ui_state["has_analyzed"] = True
+                    st.session_state.ui_state["analysis_data"] = analysis_data
+                    st.session_state.ui_state["error_message"] = None
+                    st.session_state.ui_state["download_trigger"] = None
+                    st.rerun()
+                except Exception as e:
+                    st.session_state.ui_state["error_message"] = f"Lỗi phân tích đối chiếu: {str(e)}"
+                    st.session_state.ui_state["has_analyzed"] = False
+                    st.rerun()
+            else:
+                st.session_state.ui_state["error_message"] = "Không tìm thấy file tạm đã tải lên. Vui lòng tải lại file Excel."
+                st.session_state.ui_state["uploaded_filename"] = None
+                st.session_state.ui_state["has_analyzed"] = False
+                st.rerun()
+                    
+        elif action == "export":
+            account = response.get("account")
+            creator = response.get("creator")
+            
+            if account and st.session_state.temp_analyzed_filepath and os.path.exists(st.session_state.temp_analyzed_filepath):
+                try:
+                    # Tạo báo cáo Excel in-memory
+                    excel_bytes = generate_excel_in_memory(
+                        account,
+                        creator,
+                        st.session_state.temp_analyzed_filepath
+                    )
+                    
+                    excel_base64 = base64.b64encode(excel_bytes).decode("utf-8")
+                    
+                    dl_filename = f"ChiTiet_Lech_{account}"
+                    if creator:
+                        dl_filename += f"_{creator}"
+                    dl_filename += ".xlsx"
+                    
+                    # Kích hoạt trigger download phía JS
+                    st.session_state.ui_state["download_trigger"] = {
+                        "filename": dl_filename,
+                        "data": excel_base64
+                    }
+                    st.rerun()
+                except Exception as e:
+                    st.session_state.ui_state["error_message"] = f"Lỗi xuất file Excel: {str(e)}"
+                    st.rerun()
                 
-                with open(backup_path, "wb") as f_backup:
-                    f_backup.write(file_bytes)
-                
-                st.session_state.temp_backup_filepath = backup_path
-                
-            # Cập nhật state
-            st.session_state.ui_state["uploaded_filename"] = filename
-            st.session_state.ui_state["has_analyzed"] = False
-            st.session_state.ui_state["analysis_data"] = None
+        elif action == "download_done":
             st.session_state.ui_state["download_trigger"] = None
             st.rerun()
             
-    elif action == "analyze":
-        if st.session_state.temp_original_filepath:
-            try:
-                # Kiểm tra file tạm có tồn tại không (trên Cloud có thể bị mất sau reboot)
-                if not os.path.exists(st.session_state.temp_original_filepath):
-                    st.session_state.ui_state["uploaded_filename"] = None
-                    st.session_state.ui_state["has_analyzed"] = False
-                    st.session_state.ui_state["analysis_data"] = None
-                    st.error("File tạm đã bị mất (Streamlit Cloud tự xóa). Vui lòng tải lại file Excel.")
-                    st.rerun()
-                else:
-                    # Chạy thuật toán loc_lech_taikhoan
-                    saved_path = loc_lech_taikhoan.main(st.session_state.temp_original_filepath)
-                    
-                    if not saved_path or not os.path.exists(saved_path):
-                        st.error("Thuật toán chạy xong nhưng không lưu được file kết quả. Vui lòng tải lại file và thử lại.")
-                    else:
-                        st.session_state.temp_analyzed_filepath = saved_path
-                        
-                        # Tính toán số liệu chênh lệch
-                        analysis_data = load_and_calculate_data(
-                            saved_path,
-                            st.session_state.temp_original_filepath
-                        )
-                        
-                        st.session_state.ui_state["has_analyzed"] = True
-                        st.session_state.ui_state["analysis_data"] = analysis_data
-                        st.session_state.ui_state["download_trigger"] = None
-                        st.rerun()
-            except Exception as e:
-                error_detail = traceback.format_exc()
-                st.error(f"Lỗi phân tích đối chiếu: {str(e)}")
-                print(f"[ANALYZE ERROR] {error_detail}")
-                
-    elif action == "export":
-        account = response.get("account")
-        creator = response.get("creator")
-        
-        if account and st.session_state.temp_analyzed_filepath:
-            # Tạo báo cáo Excel in-memory
-            excel_bytes = generate_excel_in_memory(
-                account,
-                creator,
-                st.session_state.temp_analyzed_filepath
-            )
-            
-            excel_base64 = base64.b64encode(excel_bytes).decode("utf-8")
-            
-            dl_filename = f"ChiTiet_Lech_{account}"
-            if creator:
-                dl_filename += f"_{creator}"
-            dl_filename += ".xlsx"
-            
-            # Kích hoạt trigger download phía JS
-            st.session_state.ui_state["download_trigger"] = {
-                "filename": dl_filename,
-                "data": excel_base64
-            }
+        elif action == "clear_error":
+            st.session_state.ui_state["error_message"] = None
             st.rerun()
-            
-    elif action == "download_done":
-        st.session_state.ui_state["download_trigger"] = None
-        st.rerun()
+
+# Chạy main nếu được thực thi trực tiếp bằng streamlit run app_streamlit.py
+if __name__ == "__main__":
+    main()

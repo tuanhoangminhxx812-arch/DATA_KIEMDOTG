@@ -7,6 +7,7 @@ IS_STREAMLIT = any('streamlit' in str(arg).lower() for arg in sys.argv) or 'STRE
 if IS_STREAMLIT:
     # Nếu chạy qua Streamlit Cloud, tự động chuyển sang giao diện Streamlit
     import app_streamlit
+    app_streamlit.main()
 else:
     import shutil
     import openpyxl
@@ -40,23 +41,12 @@ def get_safe_filename(orig_name):
         name = "data_upload.xlsx"
     return name
 
-def load_and_calculate_data(file_path):
+def load_and_calculate_data(file_path, original_filepath=None):
     """
     Đọc dữ liệu từ file Excel đã được đối chiếu để trả về cấu trúc JSON cho Frontend.
     Sử dụng openpyxl với read_only=True để tối ưu bộ nhớ và tốc độ xử lý.
     """
-    # Tìm backup path để đọc dữ liệu gốc
-    backup_path = None
-    if app_state["original_filepath"]:
-        orig_path = app_state["original_filepath"]
-        orig_dir = os.path.dirname(orig_path)
-        orig_name = os.path.basename(orig_path)
-        orig_without_ext, orig_ext = os.path.splitext(orig_name)
-        candidate = os.path.join(orig_dir, f"{orig_without_ext}_backup{orig_ext}")
-        if os.path.exists(candidate):
-            backup_path = candidate
-            
-    source_path = backup_path if backup_path else file_path
+    source_path = original_filepath if original_filepath and os.path.exists(original_filepath) else (app_state["original_filepath"] if app_state["original_filepath"] and os.path.exists(app_state["original_filepath"]) else file_path)
     print(f"Reading source data for Table A from: {source_path}")
     wb_source = openpyxl.load_workbook(source_path, data_only=True, read_only=True)
     source_sheet_name, header_row, indices = loc_lech_taikhoan.detect_sheet_and_headers(wb_source)
@@ -316,15 +306,21 @@ def analyze_file():
         return jsonify({"success": False, "message": "Vui lòng tải lên file Excel trước"}), 400
         
     try:
-        # Gọi module thuật toán đối chiếu của loc_lech_taikhoan
-        saved_path = loc_lech_taikhoan.main(app_state["original_filepath"])
+        # Gọi module thuật toán đối chiếu của loc_lech_taikhoan với file kết quả riêng biệt
+        orig_file = app_state["original_filepath"]
+        orig_dir = os.path.dirname(orig_file)
+        orig_base = os.path.basename(orig_file)
+        name_no_ext, ext = os.path.splitext(orig_base)
+        analyzed_path = os.path.join(orig_dir, f"{name_no_ext}_analyzed{ext}")
+        
+        saved_path = loc_lech_taikhoan.main(orig_file, output_path=analyzed_path)
         
         if not saved_path or not os.path.exists(saved_path):
             return jsonify({"success": False, "message": "Thuật toán chạy thành công nhưng không thể lưu file kết quả. Vui lòng kiểm tra quyền ghi hoặc đóng Excel đang mở."}), 500
             
         # Cập nhật đường dẫn file kết quả và load dữ liệu tính toán
         app_state["analyzed_filepath"] = saved_path
-        app_state["analysis_data"] = load_and_calculate_data(saved_path)
+        app_state["analysis_data"] = load_and_calculate_data(saved_path, orig_file)
         
         return jsonify({
             "success": True,
