@@ -102,11 +102,7 @@ def load_and_calculate_data(analyzed_filepath, original_filepath=None):
     cred_idx = indices['credit']
     creator_idx = indices['creator']
         
-    intermediate_accounts = [
-        '11310000000', '14190000000', '15110000000', '15190000000', '24190000000',
-        '33191000000', '33192000000', '33193000000', '33194000000', '33195000000',
-        '33196100000', '33198000000'
-    ]
+    intermediate_accounts = list(loc_lech_taikhoan.INTERMEDIATE_ACCOUNTS)
     
     # Khởi tạo Bảng A
     bang_a_data = {acc: {"account": acc, "debit": 0.0, "credit": 0.0, "diff": 0.0, "status": "Khớp"} for acc in intermediate_accounts}
@@ -116,7 +112,10 @@ def load_and_calculate_data(analyzed_filepath, original_filepath=None):
     for row in sheet.iter_rows(min_row=header_row + 1, values_only=True):
         if not row or len(row) <= acc_idx or row[acc_idx] is None:
             continue
-        acc = str(row[acc_idx]).strip().strip('="\'')
+        acc_raw = str(row[acc_idx]).strip().strip('="\'')
+        if not acc_raw:
+            continue
+        acc = loc_lech_taikhoan.normalize_account_code(acc_raw)
         if not acc:
             continue
         
@@ -127,8 +126,12 @@ def load_and_calculate_data(analyzed_filepath, original_filepath=None):
                 all_creators.add(c_val)
             
         if acc in bang_a_data:
-            deb_val = loc_lech_taikhoan.parse_float(row[deb_idx]) if len(row) > deb_idx else 0.0
-            cred_val = loc_lech_taikhoan.parse_float(row[cred_idx]) if len(row) > cred_idx else 0.0
+            deb_raw = loc_lech_taikhoan.parse_float(row[deb_idx]) if len(row) > deb_idx else 0.0
+            cred_raw = loc_lech_taikhoan.parse_float(row[cred_idx]) if len(row) > cred_idx else 0.0
+            
+            # Chuyển đổi bút toán âm tương ứng
+            deb_val = deb_raw if deb_raw > 0 else (-cred_raw if cred_raw < 0 else 0.0)
+            cred_val = cred_raw if cred_raw > 0 else (-deb_raw if deb_raw < 0 else 0.0)
             
             bang_a_data[acc]["debit"] += deb_val
             bang_a_data[acc]["credit"] += cred_val

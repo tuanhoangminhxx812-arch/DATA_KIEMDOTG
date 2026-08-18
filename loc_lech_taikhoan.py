@@ -17,6 +17,28 @@ def parse_float(val, default=0.0):
     s = str(val).strip().strip('="\'')
     if not s:
         return default
+    # Loại bỏ khoảng trắng thông thường và non-breaking spaces (\xa0)
+    s = s.replace('\xa0', '').replace(' ', '')
+    if not s:
+        return default
+    # Xử lý số âm định dạng kế toán trong ngoặc đơn: (100) -> -100
+    if s.startswith('(') and s.endswith(')'):
+        s = '-' + s[1:-1]
+    # Xử lý dấu phân cách hàng nghìn và dấu chấm/phẩy thập phân
+    if '.' in s and ',' in s:
+        if s.rfind('.') > s.rfind(','):
+            s = s.replace(',', '')
+        else:
+            s = s.replace('.', '').replace(',', '.')
+    elif ',' in s:
+        parts = s.split(',')
+        if len(parts) > 2:
+            s = s.replace(',', '')
+        elif len(parts) == 2:
+            if len(parts[1]) == 3 and len(parts[0]) <= 3:
+                s = s.replace(',', '')
+            else:
+                s = s.replace(',', '.')
     try:
         return float(s)
     except (ValueError, TypeError):
@@ -27,13 +49,56 @@ def parse_int(val, default=0):
         return default
     if isinstance(val, int):
         return val
-    s = str(val).strip().strip('="\'')
-    if not s:
-        return default
     try:
-        return int(float(s))
+        return int(round(parse_float(val, default)))
     except (ValueError, TypeError):
         return default
+
+# Bảng ánh xạ tiền tố tài khoản về mã chuẩn 11 số của EVN
+PREFIX_TO_STANDARD_ACC = {
+    '331961': '33196100000',
+    '33196': '33196100000',
+    '33191': '33191000000',
+    '33192': '33192000000',
+    '33193': '33193000000',
+    '33194': '33194000000',
+    '33195': '33195000000',
+    '33198': '33198000000',
+    '2419': '24190000000',
+    '1511': '15110000000',
+    '1519': '15190000000',
+    '1510': '15110000000',
+    '1419': '14190000000',
+    '1131': '11310000000'
+}
+
+INTERMEDIATE_ACCOUNTS = [
+    '11310000000',
+    '14190000000',
+    '15110000000',
+    '15190000000',
+    '24190000000',
+    '33191000000',
+    '33192000000',
+    '33193000000',
+    '33194000000',
+    '33195000000',
+    '33196100000',
+    '33198000000'
+]
+
+def normalize_account_code(acc_raw):
+    if not acc_raw:
+        return None
+    acc_clean = str(acc_raw).strip().strip('="\'')
+    if not acc_clean:
+        return None
+    if acc_clean in INTERMEDIATE_ACCOUNTS:
+        return acc_clean
+    for prefix, std_acc in PREFIX_TO_STANDARD_ACC.items():
+        if acc_clean.startswith(prefix):
+            return std_acc
+    return None
 
 def safe_get(row, idx, default=None):
     if idx is not None and isinstance(idx, int) and 0 <= idx < len(row):
@@ -331,20 +396,7 @@ def main(input_path=None, output_path=None):
     cred_col = get_column_letter(cred_idx + 1)
         
     target_prefixes = ('33191', '33192', '33193', '33194', '33195', '33196', '33198', '2419', '1510', '1511', '1519', '1419', '1131')
-    intermediate_accounts = [
-        '11310000000',
-        '14190000000',
-        '15110000000',
-        '15190000000',
-        '24190000000',
-        '33191000000',
-        '33192000000',
-        '33193000000',
-        '33194000000',
-        '33195000000',
-        '33196100000',
-        '33198000000'
-    ]
+    intermediate_accounts = list(INTERMEDIATE_ACCOUNTS)
     
     print("Đang phân tích dữ liệu...")
     
@@ -358,9 +410,8 @@ def main(input_path=None, output_path=None):
         acc_raw = str(row[acc_idx]).strip().strip('="\'')
         if not acc_raw:
             continue
-        acc = acc_raw
-        prefix = next((p for p in target_prefixes if acc.startswith(p)), None)
-        if not prefix and acc not in intermediate_accounts:
+        acc = normalize_account_code(acc_raw)
+        if not acc:
             continue
             
         deb_val = parse_float(safe_get(row, deb_idx, 0))
@@ -421,8 +472,10 @@ def main(input_path=None, output_path=None):
         total_deb = sum(r['deb'] for r in all_acc_rows)
         total_cred = sum(r['cred'] for r in all_acc_rows)
         
-        # Nếu tài khoản tự đối ứng khớp hoàn toàn tổng thể -> Bỏ qua không cần phân tích sâu
+        # Nếu tài khoản tự đối ứng khớp hoàn toàn tổng thể -> Đánh dấu khớp tất cả và bỏ qua
         if abs(round(total_deb - total_cred, 2)) == 0:
+            for r in all_acc_rows:
+                r['matched'] = True
             continue
             
         # 1. PHÂN TÍCH VÀ GHÉP CẶP ĐỐI ỨNG CẤP ĐỘ NGƯỜI TẠO (CREATOR LEVEL DIFFERENCE PAIRING)
